@@ -176,6 +176,53 @@ def recover_from_certificate(file_name):
 
 # ---------------------------- Objectives and assumptions ----------------------------
 
+def prop_3_1():
+    """Proposition 3.1: maximize the ordinary 3-edge density."""
+    return [(Fraction(1), flag(3, edges=[[0, 1, 2]]))], []
+
+
+def prop_3_2(base_flags):
+    """Proposition 3.2: exact six-vertex objective and degree assumption.
+
+    The objective follows the Sage notebook's construction: choose a rooted
+    edge, require its complementary three vertices also to span an edge,
+    and require exactly two of these three vertices to have at least two
+    edges meeting the root triple in two vertices. Average over all 20
+    possible root triples. All arithmetic is rational.
+
+    The degree positivity assumption is degree - (4641/10000). For a full
+    rooted 3-flag basis, its edge coefficient is 1 - beta and its nonedge
+    coefficient is -beta (not 1 and -beta).
+    """
+    beta = Fraction(4641, 10000)
+    target = []
+    V = frozenset(range(6))
+    for G in base_flags:
+        if G.size != 6:
+            raise ValueError('Proposition 3.2 requires six-vertex base flags')
+        edges = {frozenset(e) for e in G.edges}
+        count = 0
+        for root in combinations(range(6), 3):
+            rest = V - set(root)
+            if frozenset(root) not in edges or frozenset(rest) not in edges:
+                continue
+            high_root_degrees = sum(
+                sum(frozenset((v, a, b)) in edges
+                    for a, b in combinations(root, 2)) >= 2
+                for v in rest
+            )
+            if high_root_degrees == 2:
+                count += 1
+        target.append(Fraction(count, 20))
+    degree_minus_beta = [
+        (1 - beta, flag(3, edges=[[0, 1, 2]], ftype=[0])),
+        (-beta, flag(3, ftype=[0]))
+    ]
+    return target, [degree_minus_beta]
+
+
+
+
 def prop_3_3():
     """Returns the objective function as a quantum flag and the positivity
     assumptions as a list of quantum flags of Proposition 3.3.
@@ -302,58 +349,67 @@ def prop_3_3():
 
 # ---------------------------- Main ----------------------------
 
-# Read certificate
-# =================================================
-parser = argparse.ArgumentParser(
-    description="Validates that the objectives and assumptions of a given certificate correspond to those in the corresponding proposition.",
-    formatter_class=argparse.RawTextHelpFormatter,
-    epilog="""
-examples:
-  $ python validator.py prop_3_1_k4f5c.pickle.pickle
-""")
-parser.add_argument("certificate", type=str, help='path of the pickle file',
-                    choices=['prop_3_1_k4f5c.pickle',
-                             'prop_3_2_k4f5c.pickle',
-                             'prop_3_3_k4f5c.pickle'])
+def main():
+    parser = argparse.ArgumentParser(
+        description="Independently validate the objective and positivity assumptions in flag-algebra certificates.")
+    parser.add_argument("certificate", help="trusted certificate pickle; can include a directory path")
+    parser.add_argument("--range", nargs=2, type=int, metavar=("START", "END"),
+                        dest="selection", help="1-based inclusive flag-index range (default: all flags)")
+    args = parser.parse_args()
+    name = __import__('os').path.basename(args.certificate)
+    if name not in ('prop_3_1_k4f5c.pickle',
+                    'prop_3_2_k4f5c.pickle',
+                    'prop_3_3_k4f5c.pickle'):
+        parser.error('Unknown proposition certificate name')
 
-certificate_path = parser.parse_args().certificate
-
-(base_flags,
- target,
- factor_flags,
- positives) = recover_from_certificate(certificate_path)
-
-# Obtain objective and assumptions
-# =================================================
-if certificate_path in ['prop_3_1_k4f5c.pickle']:
-    objective, positivity_assumptions = prop_3_1()
-elif certificate_path in ['prop_3_2_k4f5c.pickle']:
-    objective, positivity_assumptions = prop_3_2(base_flags)
-elif certificate_path in ['prop_3_3_k4f5c.pickle']:
-    objective, positivity_assumptions = prop_3_3()
-
-# Validate objective
-# =================================================
-if isinstance(objective[0], tuple):
-    objective = change_base(objective, base_flags)
-if target == objective:
-    print("Objective function matches.\n")
-else:
-    print("ERROR: OBJECTIVE FUNCTION DOES NOT MATCH!")
-    exit(1)
-
-# Validate assumptions
-# =================================================
-for idx, assumption in enumerate(positivity_assumptions):
-    densities = [get_densities(assumption, factor_flags[idx], G)
-                 for G in base_flags]
-    transposed = list(map(list, zip(*densities)))
-    n_prev_blocks = sum([len(factor_flags[idx]) for idx in range(idx)])
-    start, end = n_prev_blocks, n_prev_blocks + len(factor_flags[idx])
-    if transposed == positives[start:end]:
-        print("Positivity assumption %d matches." % (idx + 1))
+    base_flags, target, factor_flags, positives = recover_from_certificate(args.certificate)
+    first, last = (0, len(base_flags))
+    if args.selection:
+        a, b = args.selection
+        if not (1 <= a <= b <= len(base_flags)):
+            parser.error(f'--range must satisfy 1 <= START <= END <= {len(base_flags)}')
+        first, last = a - 1, b
+    if name == 'prop_3_1_k4f5c.pickle':
+        objective, positivity_assumptions = prop_3_1()
+    elif name == 'prop_3_2_k4f5c.pickle':
+        objective, positivity_assumptions = prop_3_2(base_flags)
     else:
-        print("ERROR: POSITIVITY ASSUMPTION %d DOES NOT MATCH!" % (idx + 1))
-        exit(1)
+        objective, positivity_assumptions = prop_3_3()
 
-print("\nCOMPLETED: THE OBJECTIVES AND ASSUMPTIONS CORRESPOND TO THOSE IN THE PROPOSITION!")
+    if isinstance(objective[0], tuple):
+        objective = change_base(objective, base_flags)
+    if target[first:last] != objective[first:last]:
+        for idx in range(first, last):
+            if target[idx] != objective[idx]:
+                raise SystemExit(f'FAILED: objective at base graph {idx + 1}: '
+                                 f'{target[idx]} != {objective[idx]}')
+    print(f'PASS: Objective matches for flags {first + 1}--{last}.')
+
+    if len(factor_flags) != len(positivity_assumptions):
+        raise SystemExit('FAILED: number of positivity assumptions does not match.')
+    expected_rows = sum(len(group) for group in factor_flags)
+    if len(positives) != expected_rows:
+        raise SystemExit('FAILED: number of positivity coefficient rows does not match.')
+    n_prev = 0
+    for j, assumption in enumerate(positivity_assumptions):
+        rows = [get_densities(assumption, factor_flags[j], G)
+                for G in base_flags[first:last]]
+        actual = list(map(list, zip(*rows)))
+        expected = [col[first:last] for col in
+                    positives[n_prev:n_prev + len(factor_flags[j])]]
+        if actual != expected:
+            for local_idx, (got, want) in enumerate(zip(actual, expected)):
+                if got != want:
+                    k = next(i for i, (a, b) in enumerate(zip(got, want)) if a != b)
+                    raise SystemExit('FAILED: positivity assumption {}, factor {}, base graph {}: '
+                                     'expected {}, certificate {}'.format(
+                                         j + 1, local_idx + 1, first + k + 1,
+                                         got[k], want[k]))
+            raise SystemExit(f'FAILED: positivity assumption {j + 1}.')
+        print(f'PASS: Positivity assumption {j + 1} matches ({len(actual)} rows).')
+        n_prev += len(factor_flags[j])
+    print('SUCCESS: Independently reconstructed objectives and positivity assumptions match.')
+
+
+if __name__ == '__main__':
+    main()

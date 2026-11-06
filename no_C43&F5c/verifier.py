@@ -265,17 +265,15 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
     epilog="""
 examples:
-  $ python verify.py c5k4-bad-missing.pickle
-
-  $ python verify.py c5k4-bad-missing.pickle -p
-  Enter two integers in the range [1,28080] (e.g., `1 14040'): 1 10
-
-  $ python verifier.py c5k4-bad-missing.pickle -p -v 2
-  Enter two integers in the range [1,28080] (e.g., `1 14040'): 5 5
+  python verifier.py prop_3_2_k4f5c.pickle
+  python verifier.py prop_3_2_k4f5c.pickle --range 122 122
+  python verifier.py prop_3_3_k4f5c.pickle --range 1 1
 """)
 parser.add_argument("certificate", type=str, help='path of the pickle file')
 parser.add_argument("-p", "--partial", action='store_true',
-                    help='partial verification\n')
+                    help='interactive partial verification\n')
+parser.add_argument("--range", nargs=2, type=int, metavar=("START", "END"),
+                    dest="selection", help="1-based inclusive flag-index range, without prompting")
 parser.add_argument("-v", "--verbose", type=int, choices=[1, 2, 3], default=1,
                     help="verbosity level\ndefault: 1")
 args = parser.parse_args()
@@ -294,9 +292,25 @@ partial_verification = args.partial
  slack_vector,
  maximize) = recover_from_certificate(certificate_path)
 
+# The flag-algebra implication is valid only for NONNEGATIVE multipliers.
+# The old script omitted this requirement completely.
+# Check *every* multiplier, including in partial-verification mode.
+if len(positives) != len(e_vector):
+    raise SystemExit("VERIFICATION FAILED: multiplier count differs from positivity rows")
+for j, e in enumerate(e_vector):
+    if not isinstance(e, (int, Fraction)) or e < 0:
+        raise SystemExit("VERIFICATION FAILED: assumption multiplier %d is not a nonnegative exact rational: %r" % (j + 1, e))
+print("Verified nonnegativity of all %d assumption multipliers." % len(e_vector))
+
 start, end = 1, len(base_flags)
-if partial_verification:
-    start, end = [int(x) for x in input("Enter two integers in the range [1,%d] (e.g., `1 %d'): " % (end, (end + 1) // 2)).split(" ")]
+if args.selection is not None and partial_verification:
+    parser.error("--range cannot be combined with --partial")
+if args.selection is not None:
+    start, end = args.selection
+elif partial_verification:
+    start, end = [int(x) for x in input("Enter two integers in the range [1,%d] (e.g., `1 %d'): " % (end, (end + 1) // 2)).split()]
+if not (1 <= start <= end <= len(base_flags)):
+    parser.error("Invalid base-flag range")
 
 
 # Positive semidefinite verification
