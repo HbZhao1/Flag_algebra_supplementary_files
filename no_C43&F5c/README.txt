@@ -35,4 +35,5 @@ The displayed outputs saved in Prop3-3_verify.ipynb are historical;
 they should not be confused with a fresh run of the current scripts.
 For Proposition 3.3, the full verifier is computationally expensive.
 
-Only load certificate pickle files from a trusted source.
+The three .pickle certificate files are bundled in No_K4F5c.zip.
+Extract the archive before running the verification scripts.
